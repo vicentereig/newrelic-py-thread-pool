@@ -1,4 +1,7 @@
+
 import newrelic.agent
+
+import yappi
 import os
 import time
 from structlog import get_logger
@@ -7,12 +10,14 @@ import concurrent.futures
 import math
 from itertools import chain
 
+yappi.start()
+
 logger = get_logger(__name__)
 load_dotenv()
 
 worker_count = os.environ.get("WORKER_COUNT", 8)
-fibo_count = os.environ.get("FIBO_COUNT", 32)
-factorial_count = os.environ.get('FACTORIAL_COUNT', 50)
+fibo_count = os.environ.get("FIBO_COUNT", 8)
+factorial_count = os.environ.get('FACTORIAL_COUNT', 8)
 
 newrelic.agent.initialize('newrelic.ini')
 application = newrelic.agent.register_application(timeout=10.0)
@@ -46,7 +51,7 @@ def fibonacci_task(n):
 def retriever_task(n, url):
     newrelic.agent.insert_distributed_trace_headers(['n', n])
     logger.info("Starts retrieving contenst from URL", url=url)
-    delay_in_secs = 3 * n/factorial_count
+    delay_in_secs = 10 * n/fibo_count
     time.sleep(delay_in_secs)
     logger.info("Done retrieving contenst from URL", url=url)
 def fibonacci(n):
@@ -70,3 +75,14 @@ if __name__ == '__main__':
     logger.info("Shutdown factorial pool")
     newrelic.agent.shutdown_agent(timeout=2.5)
     logger.info("Shutdown NR agent")
+
+    yappi.stop()
+    now_in_millis = time.time()*1000
+    # https://github.com/sumerc/yappi/blob/master/doc/api.md#yfuncstat
+    with open(f"stats_functions_{now_in_millis}.csv", "x") as f:
+        for stat in yappi.get_func_stats():
+            f.write(f"{stat.module},{stat.name},{stat.lineno},{stat.ncall},{stat.ctx_id},{stat.ctx_name},{stat.full_name}\n")
+
+    with open(f"stats_threads_{now_in_millis}.csv", "x") as f:
+        for stat in yappi.get_thread_stats():
+            f.write(f"{stat.name},{stat.id},{stat.tid},{stat.ttot},{stat.sched_count}\n")
