@@ -4,6 +4,8 @@ import time
 from structlog import get_logger
 from dotenv import load_dotenv
 import concurrent.futures
+import math
+from itertools import chain
 
 logger = get_logger(__name__)
 load_dotenv()
@@ -15,20 +17,13 @@ factorial_count = os.environ.get('FACTORIAL_COUNT', 50)
 newrelic.agent.initialize('newrelic.ini')
 application = newrelic.agent.register_application(timeout=10.0)
 
-
-@newrelic.agent.background_task(name="factorial")
-def factorial(n):
-    # with newrelic.agent.FunctionTrace(f"factorial({n})", params={"n": n}):
-    # app = newrelic.agent.register_application(timeout=10.0)
-    # with newrelic.agent.BackgroundTask(app, f"factorial({n})"):
-      
 @newrelic.agent.background_task(name="FactorialTask")
 def factorial_task(n):
     newrelic.agent.accept_distributed_trace_headers({'n': n})
     logger.info("Starts calculating Factorial number", n=n)
     delay_in_secs = 3 * n/factorial_count
     time.sleep(delay_in_secs)
-    fact = factorial(n)
+    fact = math.factorial(n)
     logger.info("Done calculating Factorial number", n=n, f=fact, delay_in_secs=delay_in_secs)
     return fact
 
@@ -47,22 +42,26 @@ def fibonacci_task(n):
     logger.info("Starts calculating Fibonacci number", n=n, fib=fib)
     return fib
 
-@newrelic.agent.background_task(name="fibonacci")
+@newrelic.agent.background_task(name="RetrieverTask")
+def retriever_task(n, url):
+    newrelic.agent.insert_distributed_trace_headers(['n', n])
+    logger.info("Starts retrieving contenst from URL", url=url)
+    delay_in_secs = 3 * n/factorial_count
+    time.sleep(delay_in_secs)
+    logger.info("Done retrieving contenst from URL", url=url)
 def fibonacci(n):
-    # with newrelic.agent.FunctionTrace(f"fibonacci({n})", params={"n": n}):
-    # app = newrelic.agent.register_application(timeout=10.0)
-    # with newrelic.agent.BackgroundTask(app, f"fibonacci({n})"):
     if n <= 1:
         return n
     else:
         return fibonacci(n-1) + fibonacci(n-2)
 
 if __name__ == '__main__':
-    logger.info("Scheduling Fibonacci...")
+    logger.info("Scheduling Main Tasks...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [executor.submit(fibonacci_task, i) for i in range(fibo_count)]
-        logger.info("Scheduled Fibonacci.", fibo_count=fibo_count)
-        for future in concurrent.futures.as_completed(futures):
+        future_fibos = [executor.submit(fibonacci_task, i) for i in range(fibo_count)]
+        future_retrievals = [executor.submit(retriever_task, i, f"https://google.local/{i}.html") for i in range(fibo_count)]
+
+        for future in chain(concurrent.futures.as_completed(future_retrievals), concurrent.futures.as_completed(future_fibos)):
             future.result()
 
         logger.info("Fibonacci done.", fibonacci_result_count=fibo_count)
